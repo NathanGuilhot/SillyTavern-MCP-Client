@@ -1,15 +1,12 @@
 import { EventNames } from 'sillytavern-utils-lib/types';
-import { POPUP_TYPE } from 'sillytavern-utils-lib/types/popup';
+import { POPUP_TYPE, POPUP_RESULT } from 'sillytavern-utils-lib/types/popup';
 import { st_echo } from 'sillytavern-utils-lib/config';
 import { MCPClient, McpTool, ServerConfig } from './mcp-client.js';
+import { ToolPermission, ExtensionSettings } from './types/common.js';
 
 const extensionName = 'SillyTavern-MCP-Client';
 const globalContext = SillyTavern.getContext();
 const EXTENSION_SETTINGS_KEY = 'mcp';
-
-interface ExtensionSettings {
-  enabled: boolean;
-}
 
 function getExtensionSettings(): ExtensionSettings {
   const context = SillyTavern.getContext();
@@ -18,6 +15,7 @@ function getExtensionSettings(): ExtensionSettings {
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
   enabled: false,
+  permissions: {},
 };
 
 function initializeDefaultSettings(): void {
@@ -218,16 +216,29 @@ async function handleUIChanges(): Promise<void> {
         const tools = await MCPClient.getServerTools(server.name);
         if (tools && tools.length > 0) {
           const toolsList = serverSection.querySelector('.tools-list') as HTMLElement;
-          tools.forEach((tool: McpTool) => {
+          for (const tool of tools) {
+            // Get the tool's permission setting
+            const permission = MCPClient.getToolPermission(server.name, tool.name);
+            
             const toolItem = document.createElement('div');
             toolItem.className = 'tool-item';
             toolItem.innerHTML = `
               <div class="tool-header">
                 <span class="tool-name">${tool.name}</span>
-                <label class="checkbox_label">
-                  <input type="checkbox" class="tool-toggle" ${tool._enabled ? 'checked' : ''} />
-                  <span>Enable</span>
-                </label>
+                <div class="tool-controls">
+                  <label class="permission-label">
+                    <span>Permission:</span>
+                    <select class="tool-permission" data-server="${server.name}" data-tool="${tool.name}">
+                      <option value="always_ask" ${permission === ToolPermission.ALWAYS_ASK ? 'selected' : ''}>Always Ask</option>
+                      <option value="always_allow" ${permission === ToolPermission.ALWAYS_ALLOW ? 'selected' : ''}>Always Allow</option>
+                      <option value="deny" ${permission === ToolPermission.DENY ? 'selected' : ''}>Deny</option>
+                    </select>
+                  </label>
+                  <label class="checkbox_label">
+                    <input type="checkbox" class="tool-toggle" ${tool._enabled ? 'checked' : ''} />
+                    <span>Enable</span>
+                  </label>
+                </div>
               </div>
               <div class="tool-description">${tool.description || 'No description available'}</div>
             `;
@@ -235,9 +246,16 @@ async function handleUIChanges(): Promise<void> {
             const toolToggle = toolItem.querySelector('.tool-toggle') as HTMLInputElement & { dataset: DOMStringMap };
             toolToggle.dataset.server = server.name;
             toolToggle.dataset.tool = tool.name;
+            
+            // Add permission dropdown handler
+            const permissionSelect = toolItem.querySelector('.tool-permission') as HTMLSelectElement;
+            permissionSelect.addEventListener('change', async () => {
+              const permission = permissionSelect.value as ToolPermission;
+              await MCPClient.setToolPermission(server.name, tool.name, permission);
+            });
 
             toolsList.appendChild(toolItem);
-          });
+          }
         }
 
         toolsList.appendChild(serverSection);
@@ -497,6 +515,15 @@ async function handleUIChanges(): Promise<void> {
 }
 
 function initializeEvents() {
+  // Clear session permissions when a new chat is created or changed
+  globalContext.eventSource.on(EventNames.CHAT_CREATED, () => {
+    MCPClient.clearSessionPermissions();
+  });
+
+  globalContext.eventSource.on(EventNames.CHAT_CHANGED, () => {
+    MCPClient.clearSessionPermissions();
+  });
+
   globalContext.eventSource.on(
     EventNames.CHAT_COMPLETION_SETTINGS_READY,
     async (payload: { tools?: any[]; chat_completion_source: string }) => {

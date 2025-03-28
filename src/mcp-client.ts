@@ -1,4 +1,6 @@
 import { JsonError } from './json-error.js';
+import { POPUP_TYPE, POPUP_RESULT } from 'sillytavern-utils-lib/types/popup';
+import { ToolPermission, ExtensionSettings } from './types/common.js';
 
 export interface McpTool {
   name: string;
@@ -25,6 +27,8 @@ interface ServerData {
 }
 const PLUGIN_ID = 'mcp';
 
+// ToolPermission enum is already defined in index.ts
+
 export class MCPClient {
   /**
    * A map of connected MCP servers.
@@ -35,6 +39,11 @@ export class MCPClient {
    * A map of MCP server tools.
    */
   static #serverTools: Map<string, McpTool[]> = new Map();
+  
+  /**
+   * A map of session-level permissions (for current chat)
+   */
+  static #sessionPermissions: Map<string, ToolPermission> = new Map();
 
   static async getServers(): Promise<ServerData[]> {
     const context = SillyTavern.getContext();
@@ -102,7 +111,50 @@ export class MCPClient {
       description: tool.description || `Tool from MCP server "${serverName}"`,
       parameters: tool.inputSchema || { type: 'object', properties: {} },
       action: async (parameters: any) => {
-        return await this.callTool(serverName, tool.name, parameters);
+        // Check current permission for this tool
+        const permission = this.getToolPermission(serverName, tool.name);
+        
+        // If tool is denied, throw an error
+        if (permission === ToolPermission.DENY) {
+          throw new Error(`Tool "${tool.name}" is disabled by user settings.`);
+        }
+        
+        // If tool is allowed without asking, call it directly
+        if (permission === ToolPermission.ALWAYS_ALLOW) {
+          return await this.callTool(serverName, tool.name, parameters);
+        }
+        
+        // Otherwise, ask for permission
+        const result = await this.showToolPermissionPopup(serverName, tool.name, parameters);
+        
+        if (result.confirmed) {
+          // If user chose to remember for this chat
+          if (result.remember) {
+            if (result.rememberPermanently) {
+              // Save permanently
+              await this.setToolPermission(serverName, tool.name, ToolPermission.ALWAYS_ALLOW);
+            } else {
+              // Save for this session only
+              this.setSessionPermission(serverName, tool.name, ToolPermission.ALWAYS_ALLOW);
+            }
+          }
+          
+          // Call the tool
+          return await this.callTool(serverName, tool.name, parameters);
+        } else {
+          // User denied the tool call
+          if (result.remember) {
+            if (result.rememberPermanently) {
+              // Save permanently
+              await this.setToolPermission(serverName, tool.name, ToolPermission.DENY);
+            } else {
+              // Save for this session only
+              this.setSessionPermission(serverName, tool.name, ToolPermission.DENY);
+            }
+          }
+          
+          throw new Error(`Tool call to "${tool.name}" was denied by the user.`);
+        }
       },
       formatMessage: async (parameters: any) => {
         return `Calling MCP tool "${tool.name}" on server "${serverName}"`;
@@ -504,5 +556,139 @@ export class MCPClient {
       const error = await response.json();
       throw new Error(error.error || response.statusText);
     }
+  }
+
+  /**
+   * Gets the current permission setting for a tool
+   * @param serverName The server name
+   * @param toolName The tool name
+   * @returns The permission level for this tool
+   */
+  static getToolPermission(serverName: string, toolName: string): ToolPermission {
+    const toolId = `mcp_${serverName}_${toolName}`;
+    
+    // First check session permissions (temporary for current chat)
+    if (this.#sessionPermissions.has(toolId)) {
+      return this.#sessionPermissions.get(toolId)!;
+    }
+    
+    // Then check permanent permissions
+    const context = SillyTavern.getContext();
+    const settings = context.extensionSettings[PLUGIN_ID] as ExtensionSettings;
+    
+    if (settings.permissions?.[serverName]?.[toolName]) {
+      return settings.permissions[serverName][toolName];
+    }
+    
+    // Default to always asking
+    return ToolPermission.ALWAYS_ASK;
+  }
+
+  /**
+   * Sets a permanent permission for a tool
+   * @param serverName The server name
+   * @param toolName The tool name
+   * @param permission The permission level
+   */
+  static async setToolPermission(serverName: string, toolName: string, permission: ToolPermission): Promise<void> {
+    const context = SillyTavern.getContext();
+    const settings = context.extensionSettings[PLUGIN_ID] as ExtensionSettings;
+    
+    // Initialize permissions object if it doesn't exist
+    settings.permissions = settings.permissions || {};
+    settings.permissions[serverName] = settings.permissions[serverName] || {};
+    
+    // Set the permission
+    settings.permissions[serverName][toolName] = permission;
+    
+    // Save settings
+    context.saveSettingsDebounced();
+  }
+
+  /**
+   * Sets a temporary permission for a tool (for current chat)
+   * @param serverName The server name
+   * @param toolName The tool name 
+   * @param permission The permission level
+   */
+  static setSessionPermission(serverName: string, toolName: string, permission: ToolPermission): void {
+    const toolId = `mcp_${serverName}_${toolName}`;
+    this.#sessionPermissions.set(toolId, permission);
+  }
+
+  /**
+   * Clears all session permissions (for new chat)
+   */
+  static clearSessionPermissions(): void {
+    this.#sessionPermissions.clear();
+  }
+
+  /**
+   * Shows a permission request popup for a tool
+   * @param serverName The server name
+   * @param toolName The tool name
+   * @param parameters The parameters being passed to the tool
+   * @returns Object with confirmation result and whether to remember the choice
+   */
+  static async showToolPermissionPopup(
+    serverName: string, 
+    toolName: string, 
+    parameters: any
+  ): Promise<{confirmed: boolean; remember: boolean; rememberPermanently: boolean}> {
+    const context = SillyTavern.getContext();
+    
+    // Get tool description if available
+    const tools = await this.getServerTools(serverName);
+    const tool = tools?.find(t => t.name === toolName);
+    const description = tool?.description || 'No description available';
+    
+    // Create popup content
+    const popupContent = document.createElement('div');
+    popupContent.className = 'mcp-permission-popup';
+    popupContent.innerHTML = `
+      <h3>Tool Permission Request</h3>
+      <p>The AI wants to use the following tool:</p>
+      <div class="tool-info">
+        <p><strong>Server:</strong> ${serverName}</p>
+        <p><strong>Tool:</strong> ${toolName}</p>
+        <p><strong>Description:</strong> ${description}</p>
+      </div>
+      <div class="tool-parameters">
+        <h4>Parameters:</h4>
+        <pre>${JSON.stringify(parameters, null, 2)}</pre>
+      </div>
+      <div class="permission-options">
+        <label class="checkbox_label">
+          <input type="checkbox" id="remember-chat" />
+          <span>Remember for this chat session</span>
+        </label>
+        <label class="checkbox_label">
+          <input type="checkbox" id="remember-permanently" />
+          <span>Remember permanently</span>
+        </label>
+      </div>
+    `;
+    
+    // Create popup options
+    const popupOptions = {
+      okButton: 'Allow',
+      cancelButton: 'Deny',
+      wide: true,
+      allowHorizontalScrolling: true,
+      allowVerticalScrolling: true
+    };
+    
+    // Display the popup
+    const result = await context.callGenericPopup($(popupContent), POPUP_TYPE.CONFIRM, undefined, popupOptions);
+    
+    // Get checkbox states
+    const rememberChat = $('#remember-chat').is(':checked');
+    const rememberPermanently = $('#remember-permanently').is(':checked');
+    
+    return {
+      confirmed: result === POPUP_RESULT.AFFIRMATIVE,
+      remember: rememberChat || rememberPermanently,
+      rememberPermanently: rememberPermanently
+    };
   }
 }
