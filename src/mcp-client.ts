@@ -569,7 +569,9 @@ export class MCPClient {
     
     // First check session permissions (temporary for current chat)
     if (this.#sessionPermissions.has(toolId)) {
-      return this.#sessionPermissions.get(toolId)!;
+      const permission = this.#sessionPermissions.get(toolId)!;
+      console.log(`[MCPClient] Found session permission for ${toolId}: ${permission}`);
+      return permission;
     }
     
     // Then check permanent permissions
@@ -577,10 +579,13 @@ export class MCPClient {
     const settings = context.extensionSettings[PLUGIN_ID] as ExtensionSettings;
     
     if (settings.permissions?.[serverName]?.[toolName]) {
-      return settings.permissions[serverName][toolName];
+      const permission = settings.permissions[serverName][toolName];
+      console.log(`[MCPClient] Found permanent permission for ${toolId}: ${permission}`);
+      return permission;
     }
     
     // Default to always asking
+    console.log(`[MCPClient] No permission found for ${toolId}, defaulting to ALWAYS_ASK`);
     return ToolPermission.ALWAYS_ASK;
   }
 
@@ -614,12 +619,15 @@ export class MCPClient {
   static setSessionPermission(serverName: string, toolName: string, permission: ToolPermission): void {
     const toolId = `mcp_${serverName}_${toolName}`;
     this.#sessionPermissions.set(toolId, permission);
+    console.log(`[MCPClient] Set session permission for ${toolId}: ${permission}`);
+    console.log(`[MCPClient] Session permissions map now has ${this.#sessionPermissions.size} entries`);
   }
 
   /**
    * Clears all session permissions (for new chat)
    */
   static clearSessionPermissions(): void {
+    console.log(`[MCPClient] Clearing all session permissions`);
     this.#sessionPermissions.clear();
   }
 
@@ -642,43 +650,58 @@ export class MCPClient {
     const tool = tools?.find(t => t.name === toolName);
     const description = tool?.description || 'No description available';
     
-    // Load the template
-    const templateContent = await context.renderExtensionTemplateAsync(
-      `third-party/SillyTavern-MCP-Client`,
-      'templates/permission-request'
-    );
-    
-    // Create popup content from template
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = templateContent;
-    const popupContent = tempDiv.firstElementChild as HTMLElement;
-    
-    // Fill in the template with data
-    popupContent.querySelector('#server-name')!.textContent = serverName;
-    popupContent.querySelector('#tool-name')!.textContent = toolName;
-    popupContent.querySelector('#tool-description')!.textContent = description;
-    popupContent.querySelector('#tool-parameters')!.textContent = JSON.stringify(parameters, null, 2);
-    
-    // Create popup options
-    const popupOptions = {
-      okButton: 'Allow',
-      cancelButton: 'Deny',
-      wide: true,
-      allowHorizontalScrolling: true,
-      allowVerticalScrolling: true
-    };
-    
-    // Display the popup
-    const result = await context.callGenericPopup($(popupContent), POPUP_TYPE.CONFIRM, undefined, popupOptions);
-    
-    // Get checkbox states
-    const rememberChat = $('#remember-chat').is(':checked');
-    const rememberPermanently = $('#remember-permanently').is(':checked');
-    
-    return {
-      confirmed: result === POPUP_RESULT.AFFIRMATIVE,
-      remember: rememberChat || rememberPermanently,
-      rememberPermanently: rememberPermanently
-    };
+    // Create a promise that will be resolved when the popup is closed
+    return new Promise((resolve) => {
+      // Create popup content directly
+      const popupContent = $(`
+        <div class="mcp-permission-popup">
+          <h3>Tool Permission Request</h3>
+          <p>The AI wants to use the following tool:</p>
+          <div class="tool-info">
+            <p><strong>Server:</strong> ${serverName}</p>
+            <p><strong>Tool:</strong> ${toolName}</p>
+            <p><strong>Description:</strong> ${description}</p>
+          </div>
+          <div class="tool-parameters">
+            <h4>Parameters:</h4>
+            <pre>${JSON.stringify(parameters, null, 2)}</pre>
+          </div>
+          <div class="permission-options">
+            <label class="checkbox_label">
+              <input type="checkbox" id="remember-chat" />
+              <span>Remember for this chat session</span>
+            </label>
+            <label class="checkbox_label">
+              <input type="checkbox" id="remember-permanently" />
+              <span>Remember permanently</span>
+            </label>
+          </div>
+        </div>
+      `);
+      
+      // Create popup options with custom buttons
+      const popupOptions = {
+        okButton: 'Allow',
+        cancelButton: 'Deny',
+        wide: true,
+        allowHorizontalScrolling: true,
+        allowVerticalScrolling: true,
+        // Add a close handler to capture checkbox states
+        onClose: (popupResult: any) => {
+          // Get checkbox states while popup is still in the DOM
+          const rememberChat = popupContent.find('#remember-chat').is(':checked');
+          const rememberPermanently = popupContent.find('#remember-permanently').is(':checked');
+          
+          resolve({
+            confirmed: popupResult === POPUP_RESULT.AFFIRMATIVE,
+            remember: rememberChat || rememberPermanently,
+            rememberPermanently: rememberPermanently
+          });
+        }
+      };
+      
+      // Display the popup
+      context.callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, undefined, popupOptions);
+    });
   }
 }
