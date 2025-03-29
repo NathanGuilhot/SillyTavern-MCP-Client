@@ -216,44 +216,38 @@ async function handleUIChanges(): Promise<void> {
         const tools = await MCPClient.getServerTools(server.name);
         if (tools && tools.length > 0) {
           const toolsList = serverSection.querySelector('.tools-list') as HTMLElement;
+          const toolItemTemplate = popupContent.querySelector('#tool-item-template') as HTMLTemplateElement;
+          
           for (const tool of tools) {
             // Get the tool's permission setting
             const permission = MCPClient.getToolPermission(server.name, tool.name);
             
-            const toolItem = document.createElement('div');
-            toolItem.className = 'tool-item';
-            toolItem.innerHTML = `
-              <div class="tool-header">
-                <span class="tool-name">${tool.name}</span>
-                <div class="tool-controls">
-                  <label class="permission-label">
-                    <span>Permission:</span>
-                    <select class="tool-permission" data-server="${server.name}" data-tool="${tool.name}">
-                      <option value="always_ask" ${permission === ToolPermission.ALWAYS_ASK ? 'selected' : ''}>Always Ask</option>
-                      <option value="always_allow" ${permission === ToolPermission.ALWAYS_ALLOW ? 'selected' : ''}>Always Allow</option>
-                      <option value="deny" ${permission === ToolPermission.DENY ? 'selected' : ''}>Deny</option>
-                    </select>
-                  </label>
-                  <label class="checkbox_label">
-                    <input type="checkbox" class="tool-toggle" ${tool._enabled ? 'checked' : ''} />
-                    <span>Enable</span>
-                  </label>
-                </div>
-              </div>
-              <div class="tool-description">${tool.description || 'No description available'}</div>
-            `;
-
-            const toolToggle = toolItem.querySelector('.tool-toggle') as HTMLInputElement & { dataset: DOMStringMap };
+            // Clone the tool item template
+            const toolItemNode = toolItemTemplate.content.cloneNode(true) as DocumentFragment;
+            const toolItem = toolItemNode.querySelector('.tool-item') as HTMLElement;
+            
+            // Set tool name and description
+            (toolItem.querySelector('.tool-name') as HTMLElement).textContent = tool.name;
+            (toolItem.querySelector('.tool-description') as HTMLElement).textContent = tool.description || 'No description available';
+            
+            // Set permission dropdown value
+            const permissionSelect = toolItem.querySelector('.tool-permission') as HTMLSelectElement;
+            permissionSelect.value = permission;
+            permissionSelect.dataset.server = server.name;
+            permissionSelect.dataset.tool = tool.name;
+            
+            // Set tool toggle state
+            const toolToggle = toolItem.querySelector('.tool-toggle') as HTMLInputElement;
+            toolToggle.checked = tool._enabled || false;
             toolToggle.dataset.server = server.name;
             toolToggle.dataset.tool = tool.name;
             
             // Add permission dropdown handler
-            const permissionSelect = toolItem.querySelector('.tool-permission') as HTMLSelectElement;
             permissionSelect.addEventListener('change', async () => {
               const permission = permissionSelect.value as ToolPermission;
               await MCPClient.setToolPermission(server.name, tool.name, permission);
-            });
-
+            });    
+            
             toolsList.appendChild(toolItem);
           }
         }

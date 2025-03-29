@@ -642,32 +642,22 @@ export class MCPClient {
     const tool = tools?.find(t => t.name === toolName);
     const description = tool?.description || 'No description available';
     
-    // Create popup content
-    const popupContent = document.createElement('div');
-    popupContent.className = 'mcp-permission-popup';
-    popupContent.innerHTML = `
-      <h3>Tool Permission Request</h3>
-      <p>The AI wants to use the following tool:</p>
-      <div class="tool-info">
-        <p><strong>Server:</strong> ${serverName}</p>
-        <p><strong>Tool:</strong> ${toolName}</p>
-        <p><strong>Description:</strong> ${description}</p>
-      </div>
-      <div class="tool-parameters">
-        <h4>Parameters:</h4>
-        <pre>${JSON.stringify(parameters, null, 2)}</pre>
-      </div>
-      <div class="permission-options">
-        <label class="checkbox_label">
-          <input type="checkbox" id="remember-chat" />
-          <span>Remember for this chat session</span>
-        </label>
-        <label class="checkbox_label">
-          <input type="checkbox" id="remember-permanently" />
-          <span>Remember permanently</span>
-        </label>
-      </div>
-    `;
+    // Load the template
+    const templateContent = await context.renderExtensionTemplateAsync(
+      `third-party/SillyTavern-MCP-Client`,
+      'templates/permission-request'
+    );
+    
+    // Create popup content from template
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = templateContent;
+    const popupContent = tempDiv.firstElementChild as HTMLElement;
+    
+    // Fill in the template with data
+    popupContent.querySelector('#server-name')!.textContent = serverName;
+    popupContent.querySelector('#tool-name')!.textContent = toolName;
+    popupContent.querySelector('#tool-description')!.textContent = description;
+    popupContent.querySelector('#tool-parameters')!.textContent = JSON.stringify(parameters, null, 2);
     
     // Create popup options
     const popupOptions = {
