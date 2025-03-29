@@ -658,13 +658,15 @@ export class MCPClient {
           <h3>Tool Permission Request</h3>
           <p>The AI wants to use the following tool:</p>
           <div class="tool-info">
-            <p><strong>Server:</strong> ${serverName}</p>
-            <p><strong>Tool:</strong> ${toolName}</p>
-            <p><strong>Description:</strong> ${description}</p>
+            <p><strong>Server:</strong> ${serverName} | <strong>Tool:</strong> ${toolName}</p>
+            <details>
+              <summary>Description</summary>
+              <p>${description}</p>
+            </details>
           </div>
           <div class="tool-parameters">
             <h4>Parameters:</h4>
-            <pre>${JSON.stringify(parameters, null, 2)}</pre>
+            <pre class="code-block">${JSON.stringify(parameters, null, 2)}</pre>
           </div>
           <div class="permission-options">
             <label class="checkbox_label">

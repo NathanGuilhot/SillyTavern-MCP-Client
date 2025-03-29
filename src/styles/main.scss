@@ -30,17 +30,34 @@
   margin-bottom: 10px;
 }
 
+.mcp-permission-popup .tool-info details {
+  margin-top: 8px;
+}
+
+.mcp-permission-popup .tool-info summary {
+  cursor: pointer;
+  color: var(--SmartThemeEmColor);
+  font-weight: bold;
+}
+
 .mcp-permission-popup .tool-parameters {
   background-color: var(--bg2);
   padding: 10px;
   border-radius: 5px;
-  max-height: 200px;
-  overflow-y: auto;
+  margin-bottom: 15px;
 }
 
-.mcp-permission-popup pre {
+.mcp-permission-popup pre.code-block {
   white-space: pre-wrap;
   word-break: break-word;
+  background-color: var(--bg3, #0d1117);
+  border: 1px solid var(--SmartThemeBorderColor, #30363d);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: var(--monospace);
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
 }
 
 .mcp-permission-popup .permission-options {
