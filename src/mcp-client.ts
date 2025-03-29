@@ -650,60 +650,78 @@ export class MCPClient {
     const tool = tools?.find(t => t.name === toolName);
     const description = tool?.description || 'No description available';
     
-    // Create a promise that will be resolved when the popup is closed
-    return new Promise((resolve) => {
-      // Create popup content directly
-      const popupContent = $(`
-        <div class="mcp-permission-popup">
-          <h3>Tool Permission Request</h3>
-          <p>The AI wants to use the following tool:</p>
-          <div class="tool-info">
-            <p><strong>Server:</strong> ${serverName} | <strong>Tool:</strong> ${toolName}</p>
-            <details>
-              <summary>Description</summary>
-              <p>${description}</p>
-            </details>
-          </div>
-          <div class="tool-parameters">
-            <h4>Parameters:</h4>
-            <pre class="code-block">${JSON.stringify(parameters, null, 2)}</pre>
-          </div>
-          <div class="permission-options">
-            <label class="checkbox_label">
-              <input type="checkbox" id="remember-chat" />
-              <span>Remember for this chat session</span>
-            </label>
-            <label class="checkbox_label">
-              <input type="checkbox" id="remember-permanently" />
-              <span>Remember permanently</span>
-            </label>
-          </div>
+    // Track checkbox states with variables accessible in closure
+    let rememberChat = false;
+    let rememberPermanently = false;
+    
+    // Create popup content directly, preserving original HTML structure
+    const popupContent = $(`
+      <div class="mcp-permission-popup">
+        <h3>Tool Permission Request</h3>
+        <p>The AI wants to use the following tool:</p>
+        <div class="tool-info">
+          <p><strong>Server:</strong> ${serverName} | <strong>Tool:</strong> ${toolName}</p>
+          <details>
+            <summary>Description</summary>
+            <p>${description}</p>
+          </details>
         </div>
-      `);
-      
-      // Create popup options with custom buttons
-      const popupOptions = {
-        okButton: 'Allow',
-        cancelButton: 'Deny',
-        wide: true,
-        allowHorizontalScrolling: true,
-        allowVerticalScrolling: true,
-        // Add a close handler to capture checkbox states
-        onClose: (popupResult: any) => {
-          // Get checkbox states while popup is still in the DOM
-          const rememberChat = popupContent.find('#remember-chat').is(':checked');
-          const rememberPermanently = popupContent.find('#remember-permanently').is(':checked');
-          
-          resolve({
-            confirmed: popupResult === POPUP_RESULT.AFFIRMATIVE,
-            remember: rememberChat || rememberPermanently,
-            rememberPermanently: rememberPermanently
-          });
-        }
-      };
-      
-      // Display the popup
-      context.callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, undefined, popupOptions);
+        <div class="tool-parameters">
+          <h4>Parameters:</h4>
+          <pre class="code-block">${JSON.stringify(parameters, null, 2)}</pre>
+        </div>
+        <div class="permission-options">
+          <label class="checkbox_label">
+            <input type="checkbox" id="remember-chat" />
+            <span>Remember for this chat session</span>
+          </label>
+          <label class="checkbox_label">
+            <input type="checkbox" id="remember-permanently" />
+            <span>Remember permanently</span>
+          </label>
+        </div>
+      </div>
+    `);
+    
+    // Add event listeners to track checkbox states
+    popupContent.find('#remember-chat').on('change', function() {
+      rememberChat = $(this).is(':checked');
+      console.log(`[MCPClient] Remember chat checkbox changed: ${rememberChat}`);
     });
+    
+    popupContent.find('#remember-permanently').on('change', function() {
+      rememberPermanently = $(this).is(':checked');
+      console.log(`[MCPClient] Remember permanently checkbox changed: ${rememberPermanently}`);
+    });
+    
+    // Create popup options
+    const popupOptions = {
+      okButton: 'Allow',
+      cancelButton: 'Deny',
+      wide: true,
+      allowHorizontalScrolling: true,
+      allowVerticalScrolling: true
+    };
+    
+    // Display the popup and wait for result
+    console.log(`[MCPClient] Showing permission popup for ${serverName}:${toolName}`);
+    const result = await context.callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, undefined, popupOptions);
+    console.log(`[MCPClient] Popup result: ${result}`);
+    
+    // Check checkbox states one more time (in case the change events didn't fire)
+    if (!rememberChat) {
+      rememberChat = popupContent.find('#remember-chat').is(':checked');
+    }
+    if (!rememberPermanently) {
+      rememberPermanently = popupContent.find('#remember-permanently').is(':checked');
+    }
+    
+    console.log(`[MCPClient] Final checkbox states - remember chat: ${rememberChat}, remember permanently: ${rememberPermanently}`);
+    
+    return {
+      confirmed: result === POPUP_RESULT.AFFIRMATIVE,
+      remember: rememberChat || rememberPermanently,
+      rememberPermanently: rememberPermanently
+    };
   }
 }
